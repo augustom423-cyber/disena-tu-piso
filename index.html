@@ -268,6 +268,9 @@ aside.insp{grid-row:2;grid-column:3;background:var(--panel);border-left:1px soli
 .omove{margin:6px 0 4px;padding:10px;border-radius:12px;background:var(--lime-tint);box-shadow:inset 0 0 0 1px var(--line)}
 .omove .swlbl{margin:0 2px 8px}
 .omove .abtn{background:#fff}
+.abtn.pdf{background:var(--chrome);color:#fff;box-shadow:none}
+.abtn.pdf:hover{background:#26332b}
+.abtn:disabled{opacity:.6;cursor:progress}
 .abtn.wa{grid-column:1/-1;background:#1f8f4e;color:#fff;box-shadow:none;height:52px;font-size:15px}
 .abtn.wa:hover{background:#187a41}
 .abtn.wa[aria-disabled="true"]{opacity:.5;pointer-events:none}
@@ -596,6 +599,7 @@ const ICON = {
   fit:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   plus:'<path d="M12 5v14M5 12h14"/>',
   camera:'<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  download:'<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
   image:'<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4 18 5-5 4 4 3-3 4 4"/>',
   minus:'<path d="M5 12h14"/>',
   wa:'<path d="M4 20l1.4-4.2A8 8 0 1 1 8.2 18.6z"/><path d="M9 9.5c0 3 2.5 5.5 5.5 5.5l1.2-1.4-2-1-1 .8c-1-.4-1.9-1.3-2.3-2.3l.8-1-1-2z"/>',
@@ -996,6 +1000,7 @@ function renderInspectorBody(){
     const a = add(h(`<div class="actions"><a class="sr" id="waLink" target="_blank" rel="noopener" tabindex="-1" aria-hidden="true">WhatsApp</a><button class="abtn" data-a="copy">${ico('copy')}Copiar resumen</button><button class="abtn" data-a="share">Compartir diseño</button></div>`));
     a.querySelector('[data-a=copy]').onclick = () => copyText(quoteText(), 'Resumen copiado.');
     a.querySelector('[data-a=share]').onclick = shareDialog;
+    const pdf = add(h(`<button class="abtn pdf" id="pdfBtn" style="width:100%">${ico('download')}Descargar cotización en PDF</button>`)); pdf.onclick = quotePDF;
     const shot = add(h(`<button class="abtn" style="width:100%">${ico('camera')}Guardar imagen del diseño</button>`)); shot.onclick = captureDesign;
   }
 }
@@ -1543,6 +1548,94 @@ async function captureDesign(){
     const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
     toast('Imagen del diseño guardada.');
   } catch(e){ toast('No se pudo guardar la imagen en este navegador.'); }
+}
+/* ================= Cotización en PDF ================= */
+// La librería de PDF se carga solo cuando el cliente toca el botón (la página sigue liviana)
+const JSPDF_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+let jspdfP = null;
+function loadJsPDF(){ if (window.jspdf) return Promise.resolve(window.jspdf);
+  return jspdfP = jspdfP || new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = JSPDF_URL; sc.onload = () => window.jspdf ? res(window.jspdf) : rej(new Error('pdf')); sc.onerror = () => { jspdfP = null; rej(new Error('pdf')); }; document.head.append(sc); }); }
+// Plano 2D limpio (sin zoom, sin giro, sin selección) a un tamaño fijo, para el PDF
+function planImage(W, H){
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d'), P = poly(), b = bbox(P), garage = S.mode === 'garage';
+  const pad = CONFIG.wallT + 40, top = 44, s = Math.min((W - 80)/(b.w + 2*pad), (H - top - 40)/(b.h + 2*pad));
+  const T = {s, ox:W/2 - (b.x0 + b.w/2)*s, oy:top + (H - top)/2 - (b.y0 + b.h/2)*s, dpr:1};
+  const sel = UI.sel, rot = UI.rot; UI.sel = null; UI.rot = 0;
+  try {
+    x.fillStyle = '#ffffff'; x.fillRect(0, 0, W, H);
+    if (garage){ pathPoly(x, P, T); x.lineJoin = 'miter'; x.miterLimit = 10; x.strokeStyle = '#1d2922'; x.lineWidth = (CONFIG.wallT*2 + 4)*T.s; x.stroke(); x.strokeStyle = wallCol(S.wall).hex; x.lineWidth = CONFIG.wallT*2*T.s; x.stroke(); }
+    drawFloor(x, T, {}); drawRamps(x, T);
+    if (garage) S.openings.forEach(o => drawOpening(x, T, P, o));
+    S.objects.forEach(o => drawObject(x, T, o));
+    // cotas: ancho arriba y largo a la izquierda
+    x.fillStyle = '#1d2922'; x.strokeStyle = '#1d2922'; x.lineWidth = 1.5; x.font = '700 22px Arial, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    const gx0 = b.x0*s + T.ox, gx1 = b.x1*s + T.ox, gy0 = b.y0*s + T.oy, gy1 = b.y1*s + T.oy, off = (CONFIG.wallT + 22)*s + 14;
+    x.beginPath(); x.moveTo(gx0, gy0 - off); x.lineTo(gx1, gy0 - off); x.moveTo(gx0, gy0 - off - 7); x.lineTo(gx0, gy0 - off + 7); x.moveTo(gx1, gy0 - off - 7); x.lineTo(gx1, gy0 - off + 7);
+    x.moveTo(gx0 - off, gy0); x.lineTo(gx0 - off, gy1); x.moveTo(gx0 - off - 7, gy0); x.lineTo(gx0 - off + 7, gy0); x.moveTo(gx0 - off - 7, gy1); x.lineTo(gx0 - off + 7, gy1); x.stroke();
+    const lbl = (t, X, Y) => { const w = x.measureText(t).width + 16; x.fillStyle = '#fff'; x.fillRect(X - w/2, Y - 15, w, 30); x.fillStyle = '#1d2922'; x.fillText(t, X, Y); };
+    lbl('Ancho ' + fmt(b.w), (gx0 + gx1)/2, gy0 - off);
+    x.save(); x.translate(gx0 - off, (gy0 + gy1)/2); x.rotate(-Math.PI/2); lbl('Largo ' + fmt(b.h), 0, 0); x.restore();
+    x.font = '700 18px Arial, sans-serif'; x.fillStyle = '#55615a'; x.fillText('Entrada', (gx0 + gx1)/2, Math.min(H - 14, gy1 + off));
+  } finally { UI.sel = sel; UI.rot = rot; }
+  return c;
+}
+async function quotePDF(){
+  const btn = $('#pdfBtn'); if (btn){ btn.disabled = true; btn.dataset.t = btn.innerHTML; btn.innerHTML = `${ico('download')}Preparando PDF…`; }
+  try {
+    const {jsPDF} = await loadJsPDF(), doc = new jsPDF({unit:'pt', format:'letter'}), PW = 612, M = 40;
+    const L = t => String(t ?? '').replace(/[′’]/g, "'").replace(/[″“”]/g, '"').replace(/[–—]/g, '-').replace(/…/g, '...').replace(/[^\x00-\xff]/g, '');   // letras que entiende la fuente del PDF
+    const b = bbox(poly()), bm = bom(), sh = shapeOf(), m = modelOf(S.model), now = new Date();
+    const folio = 'GTE-' + now.toISOString().slice(2, 10).replace(/-/g, '') + '-' + String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0');
+    // Encabezado oscuro con el logo
+    doc.setFillColor(18, 26, 21); doc.rect(0, 0, PW, 92, 'F');
+    const lg = new Image(); lg.src = LOGO.logoFull; await lg.decode().catch(() => {});
+    if (lg.naturalWidth){ const lc = document.createElement('canvas'), lh = 64, lw = lh*lg.naturalWidth/lg.naturalHeight; lc.width = lw*3; lc.height = lh*3; lc.getContext('2d').drawImage(lg, 0, 0, lc.width, lc.height); doc.addImage(lc.toDataURL('image/png'), 'PNG', M, 14, lw, lh); }
+    doc.setTextColor(211, 216, 19); doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.text(L('Cotización de piso'), PW - M, 40, {align:'right'});
+    doc.setTextColor(200, 212, 203); doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    doc.text(L(now.toLocaleDateString('es-PR', {day:'numeric', month:'long', year:'numeric'}) + '  ·  ' + folio), PW - M, 58, {align:'right'});
+    doc.text(L('WhatsApp ' + (CONFIG.whatsapp ? '787-661-9995' : '')), PW - M, 74, {align:'right'});
+    let y = 118; doc.setTextColor(29, 41, 34);
+    // Cliente y espacio en dos columnas
+    const pair = (k, v, X, Y) => { doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(110, 122, 114); doc.text(L(k), X, Y); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(29, 41, 34); doc.text(L(v || '-').slice(0, X > 300 ? 34 : 26), X, Y + 14); };
+    const C = S.contact, CX = [M, M + 150, M + 270, M + 390];   // 4 columnas
+    pair('Cliente', C.name.trim() || 'Sin nombre', CX[0], y); pair('Teléfono', C.phone.trim(), CX[1], y); pair('Municipio', C.city.trim(), CX[2], y); pair('Tipo de espacio', `${S.mode === 'garage' ? 'Espacios' : 'Pads'} · ${sh.name}`, CX[3], y);
+    y += 40; pair('Medidas (largo × ancho)', `${fmt(b.h)} × ${fmt(b.w)}`, CX[0], y); pair('Superficie', fmtArea(bm.area), CX[1], y); pair('Losa', m.name, CX[2], y); pair('Patrón', S.pattern, CX[3], y);
+    // Plano
+    y += 36; const pw = PW - 2*M, ph = 290, img = planImage(1600, Math.round(1600*ph/pw));
+    doc.setDrawColor(220, 226, 221); doc.setLineWidth(1); doc.roundedRect(M, y, pw, ph, 6, 6, 'S'); doc.addImage(img.toDataURL('image/jpeg', .9), 'JPEG', M + 1, y + 1, pw - 2, ph - 2);
+    y += ph + 26;
+    // Lista de piezas
+    const pt = CONFIG.prices[S.model], pr = CONFIG.prices.ramp, pc = CONFIG.prices.corner, perTile = pt != null ? pt*TILE_FT2 : null;
+    const rows = [...bm.tiles.map(t => [`Losa ${m.name} · ${t.c.id}`, t.n, perTile, 'losa']),
+      ...(bm.rampPieces ? [[`Rampa · ${S.rampColor}`, bm.rampPieces, pr, 'pieza']] : []), ...(bm.cornerPieces ? [[`Esquinero · ${S.rampColor}`, bm.cornerPieces, pc, 'pieza']] : [])];
+    const X = [M, M + 290, M + 380, PW - M];
+    doc.setFillColor(243, 246, 243); doc.rect(M, y - 13, pw, 20, 'F'); doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(85, 97, 90);
+    doc.text('PIEZA', X[0] + 8, y); doc.text('CANTIDAD', X[1] + 60, y, {align:'right'}); doc.text(L('PRECIO C/U'), X[2] + 70, y, {align:'right'}); doc.text('SUBTOTAL', X[3] - 8, y, {align:'right'});
+    y += 22; let total = 0, complete = true;
+    rows.forEach(([k, n, price]) => { if (y > 700){ doc.addPage(); y = 60; }
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(10.5); doc.setTextColor(29, 41, 34); doc.text(L(k), X[0] + 8, y); doc.text(String(n), X[1] + 60, y, {align:'right'});
+      doc.text(L(price != null ? money(price) : 'Por confirmar'), X[2] + 70, y, {align:'right'}); doc.setFont('helvetica', 'bold'); doc.text(L(price != null ? money(price*n) : '—'), X[3] - 8, y, {align:'right'});
+      if (price != null) total += price*n; else complete = false;
+      doc.setDrawColor(230, 234, 231); doc.line(M, y + 8, PW - M, y + 8); y += 22; });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(110, 122, 114);
+    doc.text(L(`Total de losas: ${bm.totalTiles} (incluye las cortadas en los bordes). Cada losa mide 15.75" × 15.75".`), X[0] + 8, y); y += 22;
+    doc.setFillColor(29, 41, 34); doc.roundedRect(M, y - 4, pw, 36, 6, 6, 'F'); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+    doc.text(L(complete ? 'Total estimado' : 'Total estimado (parcial)'), M + 14, y + 18); doc.setTextColor(211, 216, 19); doc.setFontSize(15);
+    doc.text(L(complete ? money(total) : (total ? money(total) + ' + losas' : 'Lo confirma tu asesor')), PW - M - 14, y + 19, {align:'right'}); y += 50;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(110, 122, 114);
+    const note = (complete ? 'Precio estimado.' : 'El precio de las losas lo confirma tu asesor.') + ' Un asesor de Garaje Tu Estilo confirma las medidas y el precio final antes de instalar.' + (C.notes.trim() ? ' Notas: ' + C.notes.trim() : '');
+    doc.text(doc.splitTextToSize(L(note), pw), M, y);
+    // Pie
+    doc.setDrawColor(220, 226, 221); doc.line(M, 752, PW - M, 752); doc.setFontSize(8.5);
+    doc.text(L('Garaje Tu Estilo · Diseñado en el Floor Designer · Cotización ' + folio), M, 768); doc.text(L('WhatsApp 787-661-9995'), PW - M, 768, {align:'right'});
+    const blob = doc.output('blob'), name = `Cotizacion-Garaje-Tu-Estilo-${folio}.pdf`;
+    if (DL){ try { await DL.save({filename:name, data:blob}); toast('Cotización en PDF guardada.'); } catch(err){ if (err?.code !== 'declined') toast('No se pudo guardar el PDF aquí. Prueba desde tu página web.'); } return; }
+    const file = new File([blob], name, {type:'application/pdf'});
+    if (navigator.canShare && navigator.canShare({files:[file]}) && matchMedia('(pointer:coarse)').matches){ await navigator.share({files:[file], title:'Mi cotización · Garaje Tu Estilo'}).catch(() => {}); return; }
+    const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast('Cotización en PDF descargada.');
+  } catch(e){ toast(navigator.onLine === false ? 'Necesitas conexión a internet para crear el PDF.' : 'No se pudo crear el PDF en este navegador.'); }
+  finally { if (btn){ btn.disabled = false; btn.innerHTML = btn.dataset.t; } }
 }
 function confirmDialog(title, text, yes, onYes){ const ok = h(`<button class="pbtn dark">${esc(yes)}</button>`), no = h(`<button class="gbtn">Cancelar</button>`); const close = dialog(title, h(`<p style="margin:0;color:var(--ink-2)">${esc(text)}</p>`), [no, ok]); no.onclick = close; ok.onclick = () => { close(); onYes(); }; }
 function showCopy(title, text){ const ta = h(`<textarea class="copy" readonly></textarea>`); ta.value = text; dialog(title, ta); ta.select(); }
