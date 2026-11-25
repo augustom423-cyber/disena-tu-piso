@@ -545,6 +545,7 @@ const CONFIG = {
       {id:'jeep', name:'Jeep', kind:'car', w:188, l:425, h:180, color:'#f1d600'},
       {id:'moto', name:'Motora', kind:'moto', w:80, l:215, h:115, color:'#222629'},
       {id:'fourtrack', name:'Four track', kind:'atv', w:120, l:195, h:115, color:'#9ed120'},
+      {id:'gtelec', name:'Eléctrico deportivo', kind:'gt', w:196, l:499, h:141, color:'#8b9095'},
       {id:'atvdep', name:'Four track deportivo', kind:'atv', w:117, l:185, h:115, color:'#1d4ed8'},
       {id:'bici', name:'Bicicleta', kind:'moto', w:60, l:175, h:100, color:'#1959cc'},
     ],
@@ -1259,7 +1260,7 @@ function rrect(c, x, y, w, hh, r){ c.beginPath(); c.moveTo(x+r, y); c.arcTo(x+w,
 function drawObject(c, T, o){
   const d = objDef(o.type); if (!d) return; const [X, Y] = W2S(o.x, o.y, T), s = T.s, w = d.w*s, l = d.l*s, sel = UI.sel?.kind === 'obj' && UI.sel.id === o.id;
   c.save(); c.translate(X, Y); c.rotate(o.rot*Math.PI/180); c.shadowColor = T.noShadow ? 'transparent' : 'rgba(0,0,0,.35)'; c.shadowBlur = 12*T.dpr; c.shadowOffsetY = 4*T.dpr;
-  if (d.kind === 'car'){
+  if (d.kind === 'car' || d.kind === 'gt'){
     c.fillStyle = '#111'; for (const [sx, sy] of [[-1,-1],[1,-1],[-1,1],[1,1]]){ rrect(c, sx*w/2 - (sx > 0 ? 6*s : -6*s) - 7*s, sy*l*.3 - 16*s, 14*s, 32*s, 3*s); c.fill(); }
     rrect(c, -w/2, -l/2, w, l, Math.min(w, l)*.18); c.fillStyle = d.color; c.fill(); c.shadowColor = 'transparent';
     c.fillStyle = 'rgba(22,30,38,.85)'; rrect(c, -w*.4, l*.06, w*.8, l*.2, 8*s); c.fill(); rrect(c, -w*.38, -l*.34, w*.76, l*.13, 8*s); c.fill();
@@ -1419,7 +1420,7 @@ function placeInside(P, d, x, y){ const fits = (cx, cy) => [[0,0],[-1,-1],[1,-1]
   const b = bbox(P); let best = null; for (let cy = b.y0; cy <= b.y1; cy += 20) for (let cx = b.x0; cx <= b.x1; cx += 20){ if (!fits(cx, cy)) continue; const dd = Math.hypot(cx - x, cy - y); if (!best || dd < best[2]) best = [cx, cy, dd]; } return best ? [best[0], best[1]] : [x, y]; }
 function addObject(d){
   const P = poly(), b = bbox(P); let x = b.x0 + b.w/2, y = b.y0 + b.h*.58;
-  if (['car','moto','atv'].includes(d.kind)){ const n = S.objects.filter(o => ['car','moto','atv'].includes(objDef(o.type).kind)).length; x = b.x0 + b.w*(n % 2 ? .72 : .3); }
+  if (['car','moto','atv','gt'].includes(d.kind)){ const n = S.objects.filter(o => ['car','moto','atv','gt'].includes(objDef(o.type).kind)).length; x = b.x0 + b.w*(n % 2 ? .72 : .3); }
   else { const n = S.objects.filter(o => objDef(o.type).kind === 'cab').length; y = d.l/2 + 6; x = b.x0 + d.w/2 + 10 + (n*(d.w + 10)) % Math.max(b.w - d.w, 1); }
   [x, y] = placeInside(P, d, x, y);
   const o = {id:nid(), type:d.id, x:Math.round(x), y:Math.round(y), rot:0}; S.objects.push(o); UI.sel = {kind:'obj', id:o.id};
@@ -1792,6 +1793,7 @@ function build3D(){
       for (const sx of [-1, 1]){ const gl = new THREE.Mesh(new THREE.PlaneGeometry(cl*.86, ch*.7), glass); gl.position.set(sx*(w*.4 + .004), clear + bh + ch*.48, cz); gl.rotation.y = sx*Math.PI/2; grp.add(gl); }
       const wg = new THREE.CylinderGeometry(wr, wr, .22, 24); wg.rotateZ(Math.PI/2); for (const [sx, sz] of [[-1,-1],[1,-1],[-1,1],[1,1]]){ const wh = new THREE.Mesh(wg, mat('#151515')); wh.position.set(sx*(w*.48 - .06), wr, sz*l*.32); grp.add(wh); } }
     else if (d.kind === 'atv') buildATV(grp, d, w, l, hh);
+    else if (d.kind === 'gt') buildGT(grp, d, w, l, hh);
     else if (d.kind === 'moto'){ const body = new THREE.Mesh(new THREE.BoxGeometry(w*.5, hh*.45, l*.7), mat(d.color, {roughness:.4, metalness:.3})); body.position.y = hh*.55; grp.add(body);
       const wg = new THREE.CylinderGeometry(hh*.3, hh*.3, .08, 20); wg.rotateZ(Math.PI/2); for (const sz of [-1, 1]){ const wh = new THREE.Mesh(wg, mat('#151515')); wh.position.set(0, hh*.3, sz*l*.36); grp.add(wh); } }
     else if (d.kind === 'lift'){ for (const sx of [-1, 1]){ const p = new THREE.Mesh(new THREE.BoxGeometry(.3, hh, .3), mat(d.color)); p.position.set(sx*(w/2 - .15), hh/2, 0); grp.add(p); } const t = new THREE.Mesh(new THREE.BoxGeometry(w, .12, .2), mat(d.color)); t.position.y = hh - .06; grp.add(t); }
@@ -1804,6 +1806,40 @@ function build3D(){
 }
 // Four track deportivo en 3D (el frente mira a +z, igual que los autos): gomas con tacos, chasis y motor,
 // guardalodos delanteros y trasero levantado, asiento, tanque, manubrio, luces y estribos
+// Sedán eléctrico deportivo (sin marca): carrocería de perfil fastback extruida con bordes redondeados,
+// cabina de vidrio más angosta, aros grandes de rayos con calipers rojos, luces en franja. El frente mira a +z.
+function buildGT(grp, d, w, l, hh){
+  const paint = mat(new THREE.Color(d.color).convertSRGBToLinear().getHex(), {roughness:.28, metalness:.25}), glass = mat('#161c22', {roughness:.05, metalness:.7}), black = mat('#16181a', {roughness:.6});
+  const add = (geo, m, x, y, z, rx = 0, ry = 0, rz = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.set(rx, ry, rz); grp.add(o); return o; };
+  // perfil lateral: la línea de arriba es una curva suave (capó → parabrisas → techo → caída fastback)
+  const side = (top, bottom, width, bev) => { const sh = new THREE.Shape(); sh.moveTo(...top[0]); sh.splineThru(top.slice(1).map(([u, v]) => new THREE.Vector2(u, v))); bottom.forEach(([u, v]) => sh.lineTo(u, v));
+    const g = new THREE.ExtrudeGeometry(sh, {depth:width - 2*bev, bevelEnabled:true, bevelThickness:bev, bevelSize:bev*.85, bevelSegments:5, curveSegments:40});
+    g.translate(0, 0, -(width - 2*bev)/2); g.rotateY(-Math.PI/2); g.computeVertexNormals(); return g; };
+  const L = l/2, H = hh, R = .355, wb = l*.29;
+  // carrocería (hasta la cintura), con los huecos de las gomas
+  const arch = z => [[z + R + .07, .16], [z + R + .06, .4], [z + R*.75, .62], [z + R*.35, .72], [z, .745], [z - R*.35, .72], [z - R*.75, .62], [z - R - .06, .4], [z - R - .07, .16]];
+  add(side([[L - .04, .36], [L - .02, .52], [L - .2, .66], [L - .7, .76], [l*.17, .86], [-l*.2, .9], [-L + .45, .92], [-L + .12, .88], [-L, .74], [-L + .02, .4]],
+    [[-L + .14, .17], ...arch(-wb), ...arch(wb), [L - .16, .17]], w*.97, .11), paint, 0, 0, 0);
+  // cabina de vidrio, más angosta (se inclina hacia adentro)
+  add(side([[l*.19, .84], [l*.1, 1.08], [l*.0, H - .02], [-l*.12, H], [-l*.25, H - .1], [-L + .5, .99], [-L + .4, .9]], [[l*.19, .84]], w*.8, .07), glass, 0, 0, 0);
+  // techo de color sobre la cabina
+  add(side([[l*.03, H - .005], [-l*.06, H + .015], [-l*.15, H + .005], [-l*.21, H - .04]], [[-l*.19, H - .08], [-l*.06, H - .05], [l*.03, H - .05]], w*.66, .02), paint, 0, 0, 0);
+  for (const sx of [-1, 1]){
+    add(new THREE.BoxGeometry(.12, .05, .18), paint, sx*(w*.43), .97, l*.15, 0, sx*.25, 0);                                     // espejos
+    add(new THREE.BoxGeometry(.42, .045, .05), mat('#f2f7ff', {emissive:new THREE.Color('#b8cbe4')}), sx*w*.3, .55, L + .06, 0, -sx*.35, 0);
+    add(new THREE.BoxGeometry(.02, .08, wb*2 - R*2 - .3), black, sx*(w*.485 + .005), .24, 0);                                     // moldura negra inferior   // luces delanteras en franja
+    const wz = sx*wb;
+    for (const xs of [-1, 1]){ const x = xs*(w/2 - .125);
+      const tire = new THREE.CylinderGeometry(R, R, .25, 40); tire.rotateZ(Math.PI/2); add(tire, mat('#121212', {roughness:.9}), x, R, wz);
+      const rim = new THREE.CylinderGeometry(R*.72, R*.72, .02, 32); rim.rotateZ(Math.PI/2); add(rim, mat('#1b1e21', {roughness:.35, metalness:.6}), x + xs*.09, R, wz);
+      add(new THREE.BoxGeometry(.05, R*.46, R*.3), mat('#d0202b', {roughness:.35}), x + xs*.105, R + R*.32, wz - sx*R*.28);      // caliper rojo
+      for (let k = 0; k < 10; k++){ const a = k/10*Math.PI*2, sp = add(new THREE.BoxGeometry(.014, R*.64, .03), mat('#c9ced3', {roughness:.25, metalness:.85}), x + xs*.128, R + Math.cos(a)*R*.35, wz + Math.sin(a)*R*.35); sp.rotation.x = a; }
+      const hub = new THREE.CylinderGeometry(R*.12, R*.12, .03, 16); hub.rotateZ(Math.PI/2); add(hub, mat('#c9ced3', {metalness:.85, roughness:.25}), x + xs*.132, R, wz); }
+  }
+  add(new THREE.BoxGeometry(w*.46, .16, .05), black, 0, .4, L + .06);                                                         // entrada de aire
+  add(new THREE.BoxGeometry(w*.78, .03, .04), mat('#ff2a35', {emissive:new THREE.Color('#8a0f15')}), 0, .8, -L - .06);         // luz trasera en franja
+  add(new THREE.BoxGeometry(w*.6, .1, .04), black, 0, .3, -L - .06);                                                         // difusor
+}
 function buildATV(grp, d, w, l, hh){
   const paint = mat(new THREE.Color(d.color).convertSRGBToLinear().getHex(), {roughness:.28, metalness:.25}), black = mat('#1b1d1f', {roughness:.7}), rubber = mat('#161616', {roughness:.95}), metal = mat('#9aa0a5', {roughness:.35, metalness:.7}), rimM = mat('#2b2e31', {roughness:.4, metalness:.5});
   const add = (geo, m, x, y, z, rx = 0, ry = 0, rz = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.set(rx, ry, rz); grp.add(o); return o; };
